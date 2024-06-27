@@ -101,8 +101,6 @@ class TrapezoidalRule
 
         int n = (int)((b-a)/dx);
         
-
-        // Синтаксис запросов
         IEnumerable<double> squaresQuery = 
             from i in Enumerable.Range(0, n)
             select ((f(a + i*dx) + f(a + i*dx + dx)) / 2) * dx;
@@ -120,27 +118,141 @@ class TrapezoidalRule
 
 #!markdown
 
-Измерения вычислений
+Определение минимального шага(1e-1, 1e-2, 1 e-3, 1e-4, 1e-5, 1e-6), обеспечивающего оптимальную производительность с точностью 1e-4
 
 #!csharp
 
 using System.Diagnostics;
 
-Stopwatch oneThread = new Stopwatch();
-Stopwatch multiThread = new Stopwatch();
+var SIN = (double x) => Math.Sin(x);
+double result = DefiniteIntegral.Solve(-100, 100, SIN, 1e-3, 15);
+double rightAnswer = 0;
+if (Math.Abs(result - rightAnswer) <= 1e-4) Console.WriteLine("Заданная точность 1e-4 обеспечивается шагом 1e-5.");
+
+Stopwatch sw = new Stopwatch();
+
+sw.Start();
+TrapezoidalRule.Solve(SIN, -100, 100, 1e-4);
+singleThread.Stop();
+Console.WriteLine($"Время с шагом 1e-4: {sw.ElapsedMilliseconds/1000.0:F2} (сек)");
+sw.Reset();
+
+sw.Start();
+TrapezoidalRule.Solve(SIN, -100, 100, 1e-5);
+sw.Stop();
+Console.WriteLine($"Время с шагом 1e-5: {sw.ElapsedMilliseconds/1000.0:F2} (сек)");
+sw.Reset();
+
+sw.Start();
+TrapezoidalRule.Solve(SIN, -100, 100, 1e-6);
+singleThread.Stop();
+Console.WriteLine($"Время с шагом 1e-6: {sw.ElapsedMilliseconds/1000.0:F2} (сек)");
+/*
+    Видим, что для вычислений с шагом 1e-6 требуется значительно больше времени, чем для шага 1e-5. Это время многократно увеличится, если считать среднее значение,
+так как мы будем многократно запускать рассчёт (~5 секунд * количество запусков) Уже даже с 3 запусками придётся ждать целых 15 секунд. Однако, если мы возьмём шаг
+1e-5, то время, которое придётся нам ждать будет незначительным, даже при 10 запусках (около 5 секунд). Ну и так как этот шаг меньше чем 1e-4, при том условии, что
+что производительность оптимальна, и нам не придётся ждать очень долго при вычислении среднего значения, выберем именно этот шаг 1e-5.
+*/
+
+#!markdown
+
+Графическое представление зависимости времени выполнения программы от числа потоков
+
+#!csharp
+
+//#r "nuget:ScottPlot, 5.0.*"
+
+using ScottPlot;
+using System.Diagnostics;
+using Microsoft.DotNet.Interactive.Formatting;
+
+Formatter.Register(typeof(ScottPlot.Plot), (p, w) => 
+    w.Write(((ScottPlot.Plot)p).GetImageHtml(400, 300)), HtmlFormatter.MimeType);
 
 var SIN = (double x) => Math.Sin(x);
 
-oneThread.Start();
-double result1 = TrapezoidalRule.Solve(SIN, -100, 100, 1e-1);
-oneThread.Stop();
+List<double> dataTime = new List<double>();
+List<int> dataThreads = new List<int>();
+
+
+// Измерение среднего веремени, которое требуется для каждого числа потоков
+Stopwatch stopwatch = new Stopwatch();
+for (int threadsNumber = 2; threadsNumber < 33; threadsNumber += 2)
+{
+    // Для каждого числа потоков время измеряется 5 раз
+    int numberOfMeasurements = 4;
+    stopwatch.Start();
+    for (int i = 0; i < numberOfMeasurements; i++)
+    {
+        DefiniteIntegral.Solve(-100, 100, SIN, 1e-5, threadsNumber);
+    }
+    stopwatch.Stop();
+    dataTime.Add(stopwatch.ElapsedMilliseconds/numberOfMeasurements);
+    dataThreads.Add(threadsNumber);
+    stopwatch.Reset();
+}
+
+// Определение потока с минимальным временем
+var minThread = dataTime
+    .Zip(dataThreads, (time, thread) => new { Time = time, Thread = thread })
+    .OrderBy(pair => pair.Time)
+    .First();
+
+Console.WriteLine($"Число потоков, обеспечивающее самое быстрое решение: {minThread.Thread}. Время(мс): {minThread.Time}");
+
+ScottPlot.Plot plt = new();
+plt.Add.Scatter(dataTime, dataThreads);
+
+plt
+
+#!markdown
+
+На графике показана зависимость времени выполнения от числа потоков
+
+#!markdown
+
+Сравнение результатов однопоточного вычисления с многопоточным
+
+#!csharp
+
+using System.Diagnostics;
+
+Stopwatch singleThread = new Stopwatch();
+Stopwatch multiThread = new Stopwatch();
+
+var SIN = (double x) => Math.Sin(x);
+int numberOfMeasurements = 10; 
+
+singleThread.Start();
+for (int i = 0; i < numberOfMeasurements; i++)
+    TrapezoidalRule.Solve(SIN, -100, 100, 1e-5);
+singleThread.Stop();
 
 multiThread.Start();
-double result2 = DefiniteIntegral.Solve(-100, 100, SIN, 1e-1, 1);
+for (int i = 0; i < numberOfMeasurements; i++)
+    DefiniteIntegral.Solve(-100, 100, SIN, 1e-5, minThread.Thread);
 multiThread.Stop();
 
-Console.WriteLine($"Время с одним потоком: {oneThread.ElapsedMilliseconds}\nВремя с несколькими потоками: {multiThread.ElapsedMilliseconds}");
-Console.WriteLine(Math.Abs(result2) <= 1e-4);
+long avgSingleThread = singleThread.ElapsedMilliseconds/numberOfMeasurements;
+long avgMultiThread = multiThread.ElapsedMilliseconds/numberOfMeasurements;
+
+
+Console.WriteLine($"Время с одним потоком: {avgSingleThread} мс\nВремя с несколькими потоками: {avgMultiThread} мс");
+
+// Вычисление прироста скорости
+Console.WriteLine($"Прирост времени при однопоточном вычислении {(avgSingleThread - avgMultiThread)/(double)avgMultiThread*100:F2}%");
+
+#!markdown
+
+# Summary
+1. Размер шага был выбран 1e-5. Для вычислений с шагом 1e-6 требуется значительно больше времени, чем для шага 1e-5. Это время многократно увеличится, если считать среднее значение,
+так как мы будем многократно запускать рассчёт (~5 секунд * количество запусков) Уже даже с 3 запусками придётся ждать целых ~15 секунд. Однако, если мы возьмём шаг
+1e-5, то время, которое придётся нам ждать будет незначительным, даже при 10 запусках (около 5 секунд). Также этот шаг меньше чем 1e-4, а нам требуется выбрать минмальный шаг. При том условии,
+что производительность оптимальна, и нам не придётся ждать очень долго при вычислении среднего значения, выберем именно этот шаг 1e-5.
+
+2. Количество потоков, с которыми вычисления производятся наиболее быстро: 12-16, 28-32. Именно эти значения чаще всего(если несколько раз запускать) определяются в части с графическим представлением зависимости времени от потоков. Однако при 28-32 потоках время выполнения незначительно отличается от 12-16 потоков, поэтому нет смысла от числа потоков, большего чем 16. И оптимальным является 12-16 потоков.
+
+3. Время с одним потоком: ~520 мс. Время с несколькими потоками: ~75 мс. Прирост времени при однопоточном вычислении ~580% (Вычисление представлено в коде выше)
 
 #!csharp
 
