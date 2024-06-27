@@ -30,6 +30,10 @@
 1. Для суммирования результатов удобно воспользоваться разделяемой переменной, к которой будут прибалятся результаты вычисления прямо в самом потоке. Для синхронизации операций сложения лучше всего восользоваться [Interlocked операцией](https://learn.microsoft.com/en-us/dotnet/api/system.threading.interlocked?view=net-8.0).
 2. Основная функция долна дождаться завершения всех потоков, которые вычисляют значение на отрезках, прежде чем возвратить результат. Для этого удобнее всего использовать Примитив синхронизации Барьер](https://learn.microsoft.com/ru-ru/dotnet/standard/threading/barrier).
 
+#!markdown
+
+Код, реализующий многопоточное вычисление
+
 #!csharp
 
 using System.Threading;
@@ -79,6 +83,64 @@ class DefiniteIntegral
         barrier.SignalAndWait();
     }
 }
+
+#!markdown
+
+Код, реализующий однопоточное вычисление
+
+#!csharp
+
+class TrapezoidalRule
+{
+    public static double Solve(Func<double, double> f, double a, double b, double dx)
+    {
+        double epsilon = 1e-7;
+
+        if (dx <= epsilon || Math.Abs(b-a) <= epsilon || !Double.IsNormal(b) || !Double.IsNormal(a) || b < a) throw new ArgumentException();
+        double square = 0;
+
+        int n = (int)((b-a)/dx);
+        
+
+        // Синтаксис запросов
+        IEnumerable<double> squaresQuery = 
+            from i in Enumerable.Range(0, n)
+            select ((f(a + i*dx) + f(a + i*dx + dx)) / 2) * dx;
+
+        square = squaresQuery.Sum();
+
+        if (n * dx < b - a)
+        {
+            double x1 = a + n*dx;
+            square += ((f(x1) + f(b)) / 2) * (b - x1);
+        }
+        return square;
+    }
+}
+
+#!markdown
+
+Измерения вычислений
+
+#!csharp
+
+using System.Diagnostics;
+
+Stopwatch oneThread = new Stopwatch();
+Stopwatch multiThread = new Stopwatch();
+
+var SIN = (double x) => Math.Sin(x);
+
+oneThread.Start();
+double result1 = TrapezoidalRule.Solve(SIN, -100, 100, 1e-1);
+oneThread.Stop();
+
+multiThread.Start();
+double result2 = DefiniteIntegral.Solve(-100, 100, SIN, 1e-1, 1);
+multiThread.Stop();
+
+Console.WriteLine($"Время с одним потоком: {oneThread.ElapsedMilliseconds}\nВремя с несколькими потоками: {multiThread.ElapsedMilliseconds}");
+Console.WriteLine(Math.Abs(result2) <= 1e-4);
 
 #!csharp
 
