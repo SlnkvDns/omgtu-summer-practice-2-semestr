@@ -133,7 +133,7 @@ Stopwatch sw = new Stopwatch();
 
 sw.Start();
 TrapezoidalRule.Solve(SIN, -100, 100, 1e-4);
-singleThread.Stop();
+sw.Stop();
 Console.WriteLine($"Время с шагом 1e-4: {sw.ElapsedMilliseconds/1000.0:F2} (сек)");
 sw.Reset();
 
@@ -145,7 +145,7 @@ sw.Reset();
 
 sw.Start();
 TrapezoidalRule.Solve(SIN, -100, 100, 1e-6);
-singleThread.Stop();
+sw.Stop();
 Console.WriteLine($"Время с шагом 1e-6: {sw.ElapsedMilliseconds/1000.0:F2} (сек)");
 /*
     Видим, что для вычислений с шагом 1e-6 требуется значительно больше времени, чем для шага 1e-5. Это время многократно увеличится, если считать среднее значение,
@@ -160,7 +160,7 @@ Console.WriteLine($"Время с шагом 1e-6: {sw.ElapsedMilliseconds/1000.
 
 #!csharp
 
-//#r "nuget:ScottPlot, 5.0.*"
+#r "nuget:ScottPlot, 5.0.*"
 
 using ScottPlot;
 using System.Diagnostics;
@@ -179,7 +179,7 @@ List<int> dataThreads = new List<int>();
 Stopwatch stopwatch = new Stopwatch();
 for (int threadsNumber = 2; threadsNumber < 33; threadsNumber += 2)
 {
-    // Для каждого числа потоков время измеряется 5 раз
+    // Для каждого числа потоков время измеряется 4 раза
     int numberOfMeasurements = 4;
     stopwatch.Start();
     for (int i = 0; i < numberOfMeasurements; i++)
