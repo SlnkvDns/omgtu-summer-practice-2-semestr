@@ -34,7 +34,7 @@ using Xunit;
 
 class Message
 {
-    static int messageHandled = 0;
+    public static int messageHandled = 0;
     int id;
     public Message()
     {
@@ -60,7 +60,37 @@ using System.Collections.Concurrent;
 var queue1 = new BlockingCollection<Message>(2); //очередь первого потока
 var queue2 = new BlockingCollection<Message>(2); //очередь второго потока
 
-// Здесь писать решение
+private void Solve()
+{
+    Thread thread1 = new Thread(() => Handler(queue1, queue2));
+    Thread thread2 = new Thread(() => Handler(queue2, queue1));
+
+    queue1.Add(new Message());
+    
+    thread1.Start();
+    thread2.Start();
+    
+    thread1.Join();
+    thread2.Join();
+}
+
+private void Handler(BlockingCollection<Message> ownQueue, BlockingCollection<Message> otherQueue)
+{
+    int numHandledMessage = 0;
+    while (numHandledMessage < 100)
+    {
+        Message msg = ownQueue.Take();
+        msg.Handle();
+        numHandledMessage++;
+
+        Message newMessage = new Message();
+        otherQueue.Add(newMessage);
+    }
+}
+Solve();
+Console.WriteLine(queue1.Count);
+Console.WriteLine(queue2.Count);
+Console.WriteLine(Message.messageHandled);
 
 #!csharp
 
