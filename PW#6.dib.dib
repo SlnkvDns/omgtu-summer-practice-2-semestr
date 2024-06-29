@@ -113,65 +113,63 @@ sw.Reset();
 
 ConcurrentQueue<int> concurrentQueue = new ConcurrentQueue<int>();
 
-ManualResetEventSlim WriterFinished = new ManualResetEventSlim(false);
-ManualResetEventSlim ReaderFinished = new ManualResetEventSlim(false);
+ManualResetEvent WriterFinished = new ManualResetEvent(false);
+ManualResetEvent ReaderFinished = new ManualResetEvent(false);
 
 private void CalculateConQ()
 {
+    Stopwatch concurrentQueueTimer = new Stopwatch();
     Thread thread1 = new Thread(WriteDataConQ);
     Thread thread2 = new Thread(ReadDataConQ);
-    
 
     thread1.Start();
     thread2.Start();
 
-    WriterFinished.Wait();
-    ReaderFinished.Wait();
+    concurrentQueueTimer.Start();     // Активируем таймер после запуска обоих потоков
+    WriterFinished.WaitOne();
+    ReaderFinished.WaitOne();
+    concurrentQueueTimer.Stop();      // Останавливаем таймер после завершения работы обоих потоков
+
+    Console.WriteLine($"Время вычислений с ConcurrentQueue: {concurrentQueueTimer.ElapsedMilliseconds} ms");
 }
 
 int numObject = 1000000;
 
-private void ReadDataConQ()
-{
-    Stopwatch stw = new Stopwatch();
-    Thread curThread = Thread.CurrentThread;
-
-    int countReadNumbers = 0;
-    if (curThread.ThreadState == System.Threading.ThreadState.Running) stw.Start();
-
-    while (countReadNumbers < numObject)
-    {
-        if (concurrentQueue.TryPeek(out int item))
-            countReadNumbers++;
-    }
-    consumerFinished.Set();
-    stw.Stop();
-    Console.WriteLine($"Время, необходимое на чтение: {stw.ElapsedMilliseconds}");
-}
-
 private void WriteDataConQ()
 {
-    Stopwatch stw = new Stopwatch();
-    Thread curThread = Thread.CurrentThread;
-
+    Stopwatch writeTimer = new Stopwatch();
     int countWrittenNumbers = 0;
-    if (curThread.ThreadState == System.Threading.ThreadState.Running) stw.Start();
+    writeTimer.Start();
 
     while (countWrittenNumbers < numObject)
     {
         concurrentQueue.Enqueue(1);
         countWrittenNumbers++;
     }
-    producerFinished.Set();
-    stw.Stop();
-    Console.WriteLine($"Время, необходимое на запись: {stw.ElapsedMilliseconds}");
+
+    WriterFinished.Set();       // Сигнализируем о том, что завершилась работа с очередью (без учёта времени на остановку потока)
+    writeTimer.Stop();
+    Console.WriteLine($"Время, необходимое на запись: {writeTimer.ElapsedMilliseconds}");
 }
 
-sw.Start();
+private void ReadDataConQ()
+{
+    Stopwatch readTimer = new Stopwatch();
+    int countReadNumbers = 0;
+    readTimer.Start();
+
+    while (countReadNumbers < numObject)
+    {
+        if (concurrentQueue.TryPeek(out int item))
+            countReadNumbers++;
+    }
+    
+    ReaderFinished.Set();       // Сигнализируем о том, что завершилась работа с очередью (без учёта времени на остановку потока)
+    readTimer.Stop();
+    Console.WriteLine($"Время, необходимое на чтение: {readTimer.ElapsedMilliseconds}");
+}
+
 CalculateConQ();
-sw.Stop();
-Console.WriteLine($"Время вычислений с ConcurrentQueue: {sw.ElapsedMilliseconds} ms");
-sw.Reset();
 
 #!csharp
 
