@@ -37,9 +37,84 @@
 Для этого следует использовать условные события, которые позволят убедиться, что оба потока запустились и готовы читать и писать объекты и только потом запускать таймер.
 2. Для итогового вывода сравнивать усредненные значения.
 
-#!markdown
+#!csharp
 
-// здесь писать код
+using System.Threading;
+using System.Collections.Concurrent;
+using System.Diagnostics;
+
+BlockingCollection<int> blockingCollection = new BlockingCollection<int>(1000);
+ConcurrentQueue<int> concurrentQueue = new ConcurrentQueue<int>();
+
+private void CalculateBlCol()
+{
+    Thread thread1 = new Thread(() => ReadDataBlCol(1000000));
+    Thread thread2 = new Thread(() => WriteDataBlCol(1000000));
+
+    thread1.Start();
+    thread2.Start();
+
+    thread1.Join();
+    thread2.Join();
+}
+
+private void CalculateConQ()
+{
+    Thread thread1 = new Thread(() => ReadDataConQ(1000000));
+    Thread thread2 = new Thread(() => WriteDataConQ(1000000));
+
+    thread1.Start();
+    thread2.Start();
+
+    thread1.Join();
+    thread2.Join();
+}
+
+private void ReadDataBlCol(int numObject)
+{
+    int countReadNumbers = 0;
+    while (countReadNumbers < numObject)
+    {
+        blockingCollection.Take();
+        Interlocked.Increment(ref countReadNumbers);
+    }
+}
+
+private void WriteDataBlCol(int numObject)
+{
+    int countWrittenNumbers = 0;
+    while (countWrittenNumbers < numObject)
+    {
+        blockingCollection.Add(1);
+        Interlocked.Increment(ref countWrittenNumbers);
+    }
+}
+
+private void ReadDataConQ(int numObject)
+{
+    int countReadNumbers = 0;
+    while (countReadNumbers < numObject)
+    {
+        concurrentQueue.TryPeek(out int item);
+        Interlocked.Increment(ref countReadNumbers);
+    }
+}
+
+private void WriteDataConQ(int numObject)
+{
+    int countWrittenNumbers = 0;
+    while (countWrittenNumbers < numObject)
+    {
+        concurrentQueue.Enqueue(1);
+        Interlocked.Increment(ref countWrittenNumbers);
+    }
+}
+
+Stopwatch sw = new Stopwatch();
+sw.Start();
+Calculations();
+sw.Stop();
+Console.WriteLine(sw.ElapsedMilliseconds);
 
 #!markdown
 
