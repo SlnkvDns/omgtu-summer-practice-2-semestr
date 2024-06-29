@@ -49,61 +49,80 @@ using System.Diagnostics;
 
 BlockingCollection<int> blockingCollection = new BlockingCollection<int>();
 
-private void CalculateBlCol()
-{
-    Thread thread1 = new Thread(() => ReadDataBlCol(1000000));
-    Thread thread2 = new Thread(() => WriteDataBlCol(1000000));
+ManualResetEvent WriterStarted = new ManualResetEvent(false);
+ManualResetEvent ReaderFinished = new ManualResetEvent(false);
 
-    thread1.Start();
-    thread2.Start();
+private (long TotalTime, long WriteTime, long ReadTime) CalculateBlCol()
+{
+    Stopwatch blockingCollectionTimer = new Stopwatch();
+    long writeTime = 0;
+    long readTime = 0;
+    Thread thread1 = new Thread(() => writeTime = WriteDataBlCol());
+    Thread thread2 = new Thread(() => readTime = ReadDataBlCol());
+
+    thread2.Start();                        // Запускаем поток чтения
+    thread1.Start();                        // Запускаем поток записи
+
+    WriterStarted.WaitOne();                // Ждём начала записи объектов в очередь
+    blockingCollectionTimer.Start();        // Активируем таймер после запуска обоих потоков и начала записи
+    ReaderFinished.WaitOne();               // Ожидаем, когда поток чтения всё прочитает (ждём сигнал, о том, что будет прочитан последний объект)
+    blockingCollectionTimer.Stop();         // Останавливаем таймер после завершения чтения последнего объекта
 
     thread1.Join();
     thread2.Join();
+
+    return (blockingCollectionTimer.ElapsedMilliseconds, writeTime, readTime);
 }
 
-private void ReadDataBlCol(int numObject)
+int numObject = 1000000;
+
+private long WriteDataBlCol()
 {
-    Stopwatch stw = new Stopwatch();
-    Thread curThread = Thread.CurrentThread;
-
-    int countReadNumbers = 0;
-    if (curThread.ThreadState == System.Threading.ThreadState.Running) stw.Start();
-
-    while (countReadNumbers < numObject)
-    {
-        blockingCollection.Take();
-        countReadNumbers++;
-    }
-
-    stw.Stop();
-    Console.WriteLine($"Время, необходимое на чтение: {stw.ElapsedMilliseconds}");
-}
-
-private void WriteDataBlCol(int numObject)
-{
-    Stopwatch stw = new Stopwatch();
-    Thread curThread = Thread.CurrentThread;
-    
+    Stopwatch writeTimer = new Stopwatch();
     int countWrittenNumbers = 0;
-    if (curThread.ThreadState == System.Threading.ThreadState.Running) stw.Start();
     
+    bool firstWrite = true; 
     while (countWrittenNumbers < numObject)
     {
         blockingCollection.Add(1);
+        if (firstWrite)
+        {
+            WriterStarted.Set();    // Сигнализируем о первой записи
+            writeTimer.Start();
+            firstWrite = false;
+        }
         countWrittenNumbers++;
     }
 
-    stw.Stop();
-    Console.WriteLine($"Время, необходимое на запись: {stw.ElapsedMilliseconds}");
+    writeTimer.Stop();  // Останавливаем таймер записи после записи всех объектов
+    return writeTimer.ElapsedMilliseconds;
 }
 
-Stopwatch sw = new Stopwatch();
+private long ReadDataBlCol()
+{
+    Stopwatch readTimer = new Stopwatch();
+    int countReadNumbers = 0;
+    
 
-sw.Start();
-CalculateBlCol();
-sw.Stop();
-Console.WriteLine($"Время вычислений с BlockingCollection: {sw.ElapsedMilliseconds} ms");
-sw.Reset();
+    while (countReadNumbers < numObject)
+    {
+        if (blockingCollection.TryTake(out int item))
+        {
+            countReadNumbers++;
+            if (countReadNumbers == 1)  // При первом чтении объекта запускаем таймер потока чтения
+                readTimer.Start();
+        }
+    }
+    
+    readTimer.Stop();
+    ReaderFinished.Set();       // Сигнализируем о том, что был прочитан последний объект
+    return readTimer.ElapsedMilliseconds;
+}
+
+var result = CalculateBlCol();
+Console.WriteLine($"Время, за которое поток обработает миллион объектов: {result.TotalTime} ms");
+Console.WriteLine($"Время, необходимое на запись миллиона объектов: {result.WriteTime}");
+Console.WriteLine($"Время, необходимое на чтение миллиона объектов: {result.ReadTime}");
 
 #!markdown
 
@@ -113,34 +132,38 @@ sw.Reset();
 
 ConcurrentQueue<int> concurrentQueue = new ConcurrentQueue<int>();
 
-ManualResetEvent WriterStarted = new ManualResetEvent(false);
-ManualResetEvent ReaderFinished = new ManualResetEvent(false);
+WriterStarted = new ManualResetEvent(false);
+ReaderFinished = new ManualResetEvent(false);
 
-private void CalculateConQ()
+private (long TotalTime, long WriteTime, long ReadTime) CalculateConQ()
 {
     Stopwatch concurrentQueueTimer = new Stopwatch();
-    Thread thread1 = new Thread(WriteDataConQ);
-    Thread thread2 = new Thread(ReadDataConQ);
+    long writeTime = 0;
+    long readTime = 0;
+    Thread thread1 = new Thread(() => writeTime = WriteDataConQ());
+    Thread thread2 = new Thread(() => readTime = ReadDataConQ());
 
     thread2.Start();            // Запускаем поток чтения
     thread1.Start();            // Запускаем поток записи
 
-    WriterStarted.WaitOne();          // Ждём начала записи в очередь
+    WriterStarted.WaitOne();          // Ждём начала записи объектов в очередь
     concurrentQueueTimer.Start();     // Активируем таймер после запуска обоих потоков и начала записи
     ReaderFinished.WaitOne();         // Ожидаем, когда поток чтения всё прочитает (ждём сигнал, о том, что будет прочитан последний объект)
-    concurrentQueueTimer.Stop();      // Останавливаем таймер после завершения чтения
+    concurrentQueueTimer.Stop();      // Останавливаем таймер после завершения чтения последнего объекта
 
-    Console.WriteLine($"Время вычислений с ConcurrentQueue: {concurrentQueueTimer.ElapsedMilliseconds} ms");
+    thread1.Join();
+    thread2.Join();
+
+    return (concurrentQueueTimer.ElapsedMilliseconds, writeTime, readTime);
 }
 
 int numObject = 1000000;
 
-private void WriteDataConQ()
+private long WriteDataConQ()
 {
     Stopwatch writeTimer = new Stopwatch();
     int countWrittenNumbers = 0;
-
-    writeTimer.Start();    
+    
     bool firstWrite = true; 
     while (countWrittenNumbers < numObject)
     {
@@ -148,33 +171,41 @@ private void WriteDataConQ()
         if (firstWrite)
         {
             WriterStarted.Set();    // Сигнализируем о первой записи
+            writeTimer.Start();
             firstWrite = false;
         }
         countWrittenNumbers++;
     }
 
-    writeTimer.Stop();
-    Console.WriteLine($"Время, необходимое на запись: {writeTimer.ElapsedMilliseconds}");
+    writeTimer.Stop();  // Останавливаем таймер записи после записи всех объектов
+    return writeTimer.ElapsedMilliseconds;
 }
 
-private void ReadDataConQ()
+private long ReadDataConQ()
 {
     Stopwatch readTimer = new Stopwatch();
     int countReadNumbers = 0;
-    readTimer.Start();
+    
 
     while (countReadNumbers < numObject)
     {
         if (concurrentQueue.TryDequeue(out int item))
+        {
             countReadNumbers++;
+            if (countReadNumbers == 1)  // При первом чтении объекта запускаем таймер потока чтения
+                readTimer.Start();
+        }
     }
     
-    ReaderFinished.Set();       // Сигнализируем о том, что был прочитан последний объект
     readTimer.Stop();
-    Console.WriteLine($"Время, необходимое на чтение: {readTimer.ElapsedMilliseconds}");
+    ReaderFinished.Set();       // Сигнализируем о том, что был прочитан последний объект
+    return readTimer.ElapsedMilliseconds;
 }
 
-CalculateConQ();
+result = CalculateConQ();
+Console.WriteLine($"Время2, за которое поток обработает миллион объектов: {result.TotalTime} ms");
+Console.WriteLine($"Время2, необходимое на запись миллиона объектов: {result.WriteTime}");
+Console.WriteLine($"Время2, необходимое на чтение миллиона объектов: {result.ReadTime}");
 
 #!csharp
 
@@ -191,7 +222,7 @@ private void CalculateQueue(int numObject)
         queue.Enqueue(1);
         countWritten++;
     }
-    Console.WriteLine($"Время, необходимаое на запись: {stw.ElapsedMilliseconds}");
+    Console.WriteLine($"Время, необходимое на запись: {stw.ElapsedMilliseconds}");
     
     stw.Reset();
 
@@ -210,7 +241,7 @@ private void CalculateQueue(int numObject)
 sw.Start();
 CalculateQueue(1000000);
 sw.Stop();
-Console.WriteLine($"Время вычислений с Queue: {sw.ElapsedMilliseconds} ms");
+Console.WriteLine($"Время, необходимое на обработку миллиона объектов: {sw.ElapsedMilliseconds} ms");
 sw.Reset();
 
 #!markdown
