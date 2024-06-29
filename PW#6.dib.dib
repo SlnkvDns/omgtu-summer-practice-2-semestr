@@ -113,7 +113,7 @@ sw.Reset();
 
 ConcurrentQueue<int> concurrentQueue = new ConcurrentQueue<int>();
 
-ManualResetEvent WriterFinished = new ManualResetEvent(false);
+ManualResetEvent WriterStarted = new ManualResetEvent(false);
 ManualResetEvent ReaderFinished = new ManualResetEvent(false);
 
 private void CalculateConQ()
@@ -122,13 +122,13 @@ private void CalculateConQ()
     Thread thread1 = new Thread(WriteDataConQ);
     Thread thread2 = new Thread(ReadDataConQ);
 
-    thread1.Start();
-    thread2.Start();
+    thread2.Start();            // Запускаем поток чтения
+    thread1.Start();            // Запускаем поток записи
 
-    concurrentQueueTimer.Start();     // Активируем таймер после запуска обоих потоков
-    WriterFinished.WaitOne();
-    ReaderFinished.WaitOne();
-    concurrentQueueTimer.Stop();      // Останавливаем таймер после завершения работы обоих потоков
+    WriterStarted.WaitOne();          // Ждём начала записи в очередь
+    concurrentQueueTimer.Start();     // Активируем таймер после запуска обоих потоков и начала записи
+    ReaderFinished.WaitOne();         // Ожидаем, когда поток чтения всё прочитает (ждём сигнал, о том, что будет прочитан последний объект)
+    concurrentQueueTimer.Stop();      // Останавливаем таймер после завершения чтения
 
     Console.WriteLine($"Время вычислений с ConcurrentQueue: {concurrentQueueTimer.ElapsedMilliseconds} ms");
 }
@@ -139,15 +139,20 @@ private void WriteDataConQ()
 {
     Stopwatch writeTimer = new Stopwatch();
     int countWrittenNumbers = 0;
-    writeTimer.Start();
 
+    writeTimer.Start();    
+    bool firstWrite = true; 
     while (countWrittenNumbers < numObject)
     {
         concurrentQueue.Enqueue(1);
+        if (firstWrite)
+        {
+            WriterStarted.Set();    // Сигнализируем о первой записи
+            firstWrite = false;
+        }
         countWrittenNumbers++;
     }
 
-    WriterFinished.Set();       // Сигнализируем о том, что завершилась работа с очередью (без учёта времени на остановку потока)
     writeTimer.Stop();
     Console.WriteLine($"Время, необходимое на запись: {writeTimer.ElapsedMilliseconds}");
 }
@@ -160,11 +165,11 @@ private void ReadDataConQ()
 
     while (countReadNumbers < numObject)
     {
-        if (concurrentQueue.TryPeek(out int item))
+        if (concurrentQueue.TryDequeue(out int item))
             countReadNumbers++;
     }
     
-    ReaderFinished.Set();       // Сигнализируем о том, что завершилась работа с очередью (без учёта времени на остановку потока)
+    ReaderFinished.Set();       // Сигнализируем о том, что был прочитан последний объект
     readTimer.Stop();
     Console.WriteLine($"Время, необходимое на чтение: {readTimer.ElapsedMilliseconds}");
 }
@@ -195,7 +200,7 @@ private void CalculateQueue(int numObject)
     
     while (countRead < numObject)
     {
-        queue.Peek();
+        queue.Dequeue();
         countRead++;
     }
     stw.Stop();
