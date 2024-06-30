@@ -122,7 +122,7 @@ private long ReadDataBlCol()
 
 #!csharp
 
-//#r "nuget:ScottPlot, 5.0.*"
+#r "nuget:ScottPlot, 5.0.*"
 
 using Microsoft.DotNet.Interactive.Formatting;
 Formatter.Register(typeof(ScottPlot.Plot), (p, w) => 
@@ -242,11 +242,6 @@ private long ReadDataConQ()
 
 #!csharp
 
-using Microsoft.DotNet.Interactive.Formatting;
-Formatter.Register(typeof(ScottPlot.Plot), (p, w) => 
-    w.Write(((ScottPlot.Plot)p).GetImageHtml(400, 300)), HtmlFormatter.MimeType);
-
-
 List<int> dataX = new List<int>();
 List<long> dataY1 = new List<long>();
 List<long> dataY2 = new List<long>();
@@ -255,8 +250,8 @@ double avgFirstIntervalConQ = 0;
 for (int i = 1; i < 11; i++)
 {
     result = CalculateConQ();
-    firstInterval = result.ReadTime;
-    secondInterval = result.TotalTime;
+    firstInterval = result.ReadTime;            // Время за которое поток или цикл обработает миллион объектов
+    secondInterval = result.TotalTime;          // Время, необходимое на запись и чтение миллиона объектов из очереди
     avgFirstIntervalConQ += firstInterval / 10.0;
     
     dataX.Add(i);
@@ -319,12 +314,6 @@ private (long TotalTime, long WriteTime, long ReadTime) CalculateQueue(int numOb
     return (totalTime.ElapsedMilliseconds, writeTime, readTime);
 }
 
-var result = CalculateQueue(1000000);
-long firstInterval = result.ReadTime + result.WriteTime;
-long secondInterval = result.TotalTime;
-Console.WriteLine($"Время, за которое поток обработает миллион объектов: {firstInterval} ms");
-Console.WriteLine($"Время, необходимое на запись и чтение миллиона объектов: {secondInterval} ms");
-
 #!csharp
 
 List<int> dataX = new List<int>();
@@ -335,9 +324,9 @@ double avgFirstIntervalQueue = 0;
 for (int i = 1; i < 11; i++)
 {
     result = CalculateQueue(1000000);
-    firstInterval = result.ReadTime + result.WriteTime;
-    secondInterval = result.TotalTime;
-    avgFirstIntervalQueue += firstInterval / 10.0;
+    firstInterval = result.ReadTime + result.WriteTime;         // Время за которое поток или цикл обработает миллион объектов
+    secondInterval = result.TotalTime;                          // Время, необходимое на запись и чтение миллиона объектов из очереди
+    avgFirstIntervalQueue += firstInterval / 10.0;  
     
     dataX.Add(i);
     dataY1.Add(firstInterval);
@@ -359,6 +348,14 @@ plt2.YLabel("Второй промежуток времени");
 plt1.Display();
 plt2.Display();
 
+#!csharp
+
+Console.WriteLine($"Среднее время за которое BlockingCollection обработает миллион объектов: {Math.Round(avgFirstIntervalBlockCol, 2)}");
+Console.WriteLine($"Среднее время за которое ConcurrentQueue обработает миллион объектов: {Math.Round(avgFirstIntervalConQ, 2)}");
+Console.WriteLine($"Среднее время за которое Queue обработает миллион объектов: {Math.Round(avgFirstIntervalQueue, 2)}");
+Console.WriteLine($"Cкорость самой быстрой поток-безопасной коллекции по сравнению с обычной очредью: {Math.Round(19*100 / avgFirstIntervalQueue, 2)}%")
+
 #!markdown
 
 ## Вывод
+Самой быстрой поток-безопасной очередью является ConcurrentQueue. В данной задаче она медленнее обычной очереди, так как требуется дополниетельное время для синхронизации. Её скорость по сравненю с обычной очередью ~200% Однако она многократно быстрее BlockingCollection.
