@@ -136,9 +136,9 @@ double avgFirstIntervalBlockCol = 0;
 
 for (int i = 1; i < 11; i++)
 {
-    result = CalculateBlCol();
-    firstInterval = result.ReadTime;                // Время за которое поток или цикл обработает миллион объектов
-    secondInterval = result.TotalTime;              // Время, необходимое на запись и чтение миллиона объектов из очереди
+    var result = CalculateBlCol();
+    long firstInterval = result.ReadTime;                // Время за которое поток или цикл обработает миллион объектов
+    long secondInterval = result.TotalTime;              // Время, необходимое на запись и чтение миллиона объектов из очереди
     avgFirstIntervalBlockCol += firstInterval / 10.0;
     
     dataX.Add(i);
@@ -249,9 +249,9 @@ double avgFirstIntervalConQ = 0;
 
 for (int i = 1; i < 11; i++)
 {
-    result = CalculateConQ();
-    firstInterval = result.ReadTime;            // Время за которое поток или цикл обработает миллион объектов
-    secondInterval = result.TotalTime;          // Время, необходимое на запись и чтение миллиона объектов из очереди
+    var result = CalculateConQ();
+    long firstInterval = result.ReadTime;            // Время за которое поток или цикл обработает миллион объектов
+    long secondInterval = result.TotalTime;          // Время, необходимое на запись и чтение миллиона объектов из очереди
     avgFirstIntervalConQ += firstInterval / 10.0;
     
     dataX.Add(i);
@@ -323,9 +323,9 @@ double avgFirstIntervalQueue = 0;
 
 for (int i = 1; i < 11; i++)
 {
-    result = CalculateQueue(1000000);
-    firstInterval = result.ReadTime + result.WriteTime;         // Время за которое поток или цикл обработает миллион объектов
-    secondInterval = result.TotalTime;                          // Время, необходимое на запись и чтение миллиона объектов из очереди
+    var result = CalculateQueue(1000000);
+    long firstInterval = result.ReadTime + result.WriteTime;         // Время за которое поток или цикл обработает миллион объектов
+    long secondInterval = result.TotalTime;                          // Время, необходимое на запись и чтение миллиона объектов из очереди
     avgFirstIntervalQueue += firstInterval / 10.0;  
     
     dataX.Add(i);
