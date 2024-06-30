@@ -122,7 +122,7 @@ private long ReadDataBlCol()
 
 #!csharp
 
-//#r "nuget:ScottPlot, 5.0.*"
+#r "nuget:ScottPlot, 5.0.*"
 
 using Microsoft.DotNet.Interactive.Formatting;
 Formatter.Register(typeof(ScottPlot.Plot), (p, w) => 
