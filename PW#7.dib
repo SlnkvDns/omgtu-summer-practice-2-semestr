@@ -17,9 +17,95 @@
 
 #!csharp
 
+using System.Threading;
+using System.Collections.Concurrent;
+
 public interface ICommand
 {
     void Execute();
+}
+
+class HardStop: ICommand
+{
+    ServerThread thread;
+    public HardStop(ServerThread stopedThread)
+    {
+        thread = stopedThread;
+    }
+
+    public void Execute()
+    {
+        if (Thread.CurrentThread != thread.currentServerThread)
+        {
+            throw new Exception();
+        }
+
+        thread.canContinue = false;
+    }
+}
+
+class SoftStop: ICommand
+{
+    ServerThread thread;
+    public SoftStop(ServerThread stopedThread)
+    {
+        thread = stopedThread;
+    }
+
+    public void Execute()
+    {
+        if (Thread.CurrentThread != thread.currentServerThread)
+        {
+            throw new Exception();
+        }
+
+        thread.canContinue = thread.queue.Count > 0;
+    }
+}
+
+class ServerThread
+{
+    public ConcurrentQueue<ICommand> queue;
+    public bool canContinue = true;
+    public Thread currentServerThread;
+
+    public ServerThread()
+    {
+        queue = new ConcurrentQueue<ICommand>();
+        Thread thread1 = new Thread(Handle);
+        Thread thread2 = new Thread(Handle);
+
+        thread1.Start();
+        thread2.Start();
+    }
+
+    private void ExeptionHandler(Exception ex, ICommand command)
+    {
+        if (command != null)
+        {
+            // Обработка исключения
+        }
+    }
+
+    private void Handle()
+    {
+        currentServerThread = Thread.CurrentThread;
+        while (canContinue)
+        {
+            ICommand command = null;
+            try
+            {
+                if (queue.TryDequeue(out command))
+                {
+                    command.Execute();
+                }
+            }
+            catch (Exception ex)
+            {
+                ExeptionHandler(ex, command);
+            }
+        }
+    }
 }
 
 #!markdown
