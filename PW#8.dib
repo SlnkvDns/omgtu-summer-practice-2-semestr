@@ -35,12 +35,225 @@
 
 #!csharp
 
+using System.Threading;
+using System.Collections.Concurrent;
+
+
 public interface IScheduler
 {
-    bool HasCommand()
+    bool HasCommand();
     ICommand Select();
     void Add(ICommand cmd);
 }
+
+public interface ICommand
+{
+    bool wasCalled {get; set;}
+    void Execute();
+}
+
+class Scheduler: IScheduler
+{
+    ConcurrentQueue<ICommand> queue = new ConcurrentQueue<ICommand>();
+    public List<ICommand> longCommandQueue = new List<ICommand>();
+    int currentIndex = 0;
+
+    public bool HasCommand()
+    {
+        return queue.Count > 0 || longCommandQueue.Count > 0;
+    }
+
+    public ICommand Select()
+    {
+        if (longCommandQueue.Count > 0)
+        {
+            currentIndex = (currentIndex + 1) % longCommandQueue.Count; // Round Robin
+            return longCommandQueue[currentIndex];
+        }
+
+        else if (queue.TryDequeue(out ICommand command))
+        {
+            return command;
+        }
+
+        return null;
+    }
+
+    public void Add(ICommand cmd)
+    {
+        if (!cmd.wasCalled)
+        {
+            longCommandQueue.Add(cmd);
+        }
+
+        else
+        {
+            queue.Enqueue(cmd);
+        }
+    }
+}
+
+class HardStop: ICommand
+{
+    ServerThread thread;
+    public ManualResetEvent mre;
+    public bool wasCalled {get; set;}
+    public HardStop(ServerThread stopedThread)
+    {
+        mre = new ManualResetEvent(false);
+        thread = stopedThread;
+        wasCalled = false;
+    }
+
+    public void Execute()
+    {
+        if (Thread.CurrentThread != thread.currentServerThread)
+        {
+            throw new Exception();
+        }
+
+        mre.Reset();
+        thread.canContinue = false;
+        wasCalled = true;
+        mre.Set();
+    }
+}
+
+class SoftStop: ICommand
+{
+    ServerThread thread;
+    public ManualResetEvent mre;
+    public bool wasCalled {get; set;}
+    public SoftStop(ServerThread stopedThread)
+    {
+        mre = new ManualResetEvent(false);
+        thread = stopedThread;
+        wasCalled = false;
+    }
+
+    public void Execute()
+    {
+        if (Thread.CurrentThread != thread.currentServerThread)
+        {
+            throw new Exception();
+        }
+
+        mre.Reset();
+        thread.softStopFlag = true;
+        wasCalled = true;
+        mre.Set();
+    }
+}
+
+class SomeCommand: ICommand
+{
+    public bool wasCalled {get; set;}
+    public ManualResetEvent mre;
+
+    public SomeCommand()
+    {
+        mre = new ManualResetEvent(false);
+        wasCalled = false;
+    }
+    
+    public void Execute()
+    {
+        mre.Reset();
+        wasCalled = true;
+        mre.Set();
+    }
+}
+
+class LongCommand: ICommand
+{
+    public bool wasCalled {get; set;}
+    public ManualResetEvent mre;
+
+    public LongCommand()
+    {
+        mre = new ManualResetEvent(false);
+        wasCalled = false;
+    }
+    
+    public void Execute()
+    {
+        mre.Reset();
+        for (int i = 0; i < 100; i++) {}
+        wasCalled = true;
+        mre.Set();
+    }
+}
+
+class ServerThread
+{
+    public Thread currentServerThread;
+    public ConcurrentQueue<ICommand> queue;
+    public bool canContinue = true;
+    public bool softStopFlag = false;
+    public Scheduler scheduler;
+    
+
+    public ServerThread(Scheduler scheduler)
+    {
+        this.scheduler = scheduler;
+        queue = new ConcurrentQueue<ICommand>();
+        Thread thread = new Thread(Handle);
+        currentServerThread = thread;
+        thread.Start();
+    }
+
+    public void AddCommand(ICommand command)
+    {
+        scheduler.Add(command);
+    }
+
+    private void ExeptionHandler(Exception ex, ICommand command)
+    {
+        if (command != null)
+        {
+            // Обработка исключения
+        }
+    }
+
+    public void Handle()
+    {
+        while (canContinue)
+        {
+            ICommand command = null;
+            try
+            {
+                if (scheduler.HasCommand())
+                {
+                    command = scheduler.Select();
+                    command.Execute();
+
+                    if (command.wasCalled)
+                    {
+                        scheduler.longCommandQueue.RemoveAll(cmd => cmd.wasCalled);
+                    }
+                }
+                
+                else if (softStopFlag)
+                {
+                    canContinue = false;
+                }
+            }
+            catch (Exception ex)
+            {
+                ExeptionHandler(ex, command);
+            }
+        }
+    }
+}
+
+#!csharp
+
+Scheduler scheduler = new Scheduler();
+ServerThread server = new ServerThread(scheduler);
+
+server.AddCommand(new SomeCommand());
+server.AddCommand(new LongCommand());  // Команда с длительным выполнением
+server.AddCommand(new SoftStop(server));
 
 #!markdown
 
