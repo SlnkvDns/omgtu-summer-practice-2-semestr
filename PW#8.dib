@@ -35,24 +35,25 @@
 
 #!csharp
 
+using System;
 using System.Threading;
 using System.Collections.Concurrent;
-
+using System.Collections.Generic;
 
 public interface IScheduler
 {
     bool HasCommand();
-    ICommand Select();
+    ICommand Select(bool isLongThread);
     void Add(ICommand cmd);
 }
 
 public interface ICommand
 {
-    bool wasCalled {get; set;}
+    bool wasCalled { get; set; }
     void Execute();
 }
 
-class Scheduler: IScheduler
+class Scheduler : IScheduler
 {
     private ConcurrentQueue<ICommand> queue = new ConcurrentQueue<ICommand>();
     private ConcurrentQueue<ICommand> longQueue = new ConcurrentQueue<ICommand>();
@@ -66,19 +67,24 @@ class Scheduler: IScheduler
 
     public bool HasCommand()
     {
-        return queue.Count > 0 || longQueue.Count > 0;
+        return !queue.IsEmpty || !longQueue.IsEmpty;
     }
 
-    public ICommand Select()
+    public ICommand Select(bool isLongThread)
     {
-        if (queue.TryDequeue(out ICommand command))
+        if (isLongThread)
         {
-            return command;
+            if (longQueue.TryDequeue(out ICommand command))
+            {
+                return command;
+            }
         }
-        
-        if (longQueue.TryDequeue(out command))
+        else
         {
-            return command;
+            if (queue.TryDequeue(out ICommand command))
+            {
+                return command;
+            }
         }
 
         return null;
@@ -90,7 +96,6 @@ class Scheduler: IScheduler
         {
             longQueue.Enqueue(cmd);
         }
-
         else
         {
             queue.Enqueue(cmd);
@@ -100,18 +105,17 @@ class Scheduler: IScheduler
     public ServerThread GetNextThread()
     {
         currentIndexThread++;
-        return longThreads[currentIndexThread % 2];     // Циклически определяем следующий поток (Round Robin)
+        return longThreads[currentIndexThread % longThreads.Count];
     }
 }
 
-class HardStop: ICommand
+class HardStop : ICommand
 {
     ServerThread thread;
-    public bool wasCalled {get; set;}
-    public bool IsLongCommand {get; set;} = false;
-    public HardStop(ServerThread stopedThread)
+    public bool wasCalled { get; set; }
+    public HardStop(ServerThread stoppedThread)
     {
-        thread = stopedThread;
+        thread = stoppedThread;
         wasCalled = false;
     }
 
@@ -127,14 +131,13 @@ class HardStop: ICommand
     }
 }
 
-class SoftStop: ICommand
+class SoftStop : ICommand
 {
     ServerThread thread;
-    public bool wasCalled {get; set;}
-    public bool IsLongCommand {get; set;} = false;
-    public SoftStop(ServerThread stopedThread)
+    public bool wasCalled { get; set; }
+    public SoftStop(ServerThread stoppedThread)
     {
-        thread = stopedThread;
+        thread = stoppedThread;
         wasCalled = false;
     }
 
@@ -150,25 +153,26 @@ class SoftStop: ICommand
     }
 }
 
-class SomeCommand: ICommand
+class SomeCommand : ICommand
 {
-    public bool wasCalled {get; set;}
+    public bool wasCalled { get; set; }
 
     public SomeCommand()
     {
         wasCalled = false;
     }
-    
+
     public void Execute()
     {
         wasCalled = true;
+        Console.WriteLine($"Executing SomeCommand in Thread: {Thread.CurrentThread.ManagedThreadId}");
     }
 }
 
-class LongRunningCommandWrapper: ICommand
+class LongRunningCommandWrapper : ICommand
 {
     ICommand longCommand;
-    public bool wasCalled {get; set;}
+    public bool wasCalled { get; set; }
 
     public LongRunningCommandWrapper(ICommand command)
     {
@@ -179,6 +183,7 @@ class LongRunningCommandWrapper: ICommand
     public void Execute()
     {
         longCommand.Execute();
+        Console.WriteLine($"Executing LongRunningCommandWrapper in Thread: {Thread.CurrentThread.ManagedThreadId}");
         wasCalled = true;
     }
 }
@@ -190,7 +195,6 @@ class ServerThread
     public bool softStopFlag = false;
     public Scheduler scheduler;
     public bool isLongThread;
-    
 
     public ServerThread(Scheduler scheduler, bool isLongThread)
     {
@@ -223,24 +227,12 @@ class ServerThread
             {
                 if (scheduler.HasCommand())
                 {
-                    command = scheduler.Select();
-                    if (command is LongRunningCommandWrapper && !isLongThread)
+                    command = scheduler.Select(isLongThread);
+                    if (command != null)
                     {
-                        ServerThread nextThread = scheduler.GetNextThread();    
-                        nextThread.AddCommand(command);   // Добавляем долгую команду в отдельный поток для долгих команд
-                    }
-                    
-                    else if (command is LongRunningCommandWrapper && isLongThread)
-                    {
-                        command.Execute();         // Если мы в потоке для долгих команд, и команда является долгой, выполняем эту комнаду
-                    }
-
-                    else
-                    {
-                        command.Execute();         // Если команда не является долгой, выполняем её
+                        command.Execute();
                     }
                 }
-                
                 else if (softStopFlag)
                 {
                     canContinue = false;
@@ -269,7 +261,6 @@ LongRunningCommandWrapper cmd2 = new LongRunningCommandWrapper(cmd1);
 SomeCommand cmd3 = new SomeCommand();
 
 server.AddCommand(cmd1);
-Console.WriteLine(scheduler.HasCommand());
 server.AddCommand(cmd2);  // Команда с длительным выполнением
 server.AddCommand(cmd3);
 
@@ -278,9 +269,6 @@ Thread.Sleep(100);
 Console.WriteLine(cmd1.wasCalled);
 Console.WriteLine(cmd2.wasCalled);
 Console.WriteLine(cmd3.wasCalled);
-
-
-Console.WriteLine(scheduler.HasCommand());
 
 #!markdown
 
