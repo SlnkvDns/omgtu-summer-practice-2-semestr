@@ -20,21 +20,267 @@
 
 #!csharp
 
-interface ICommand
+using System;
+using System.Threading;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+
+public interface IScheduler
 {
-    void Execute();
+    bool HasCommand();
+    ICommand Select(bool isLongThread, Thread thread);
+    void Add(ICommand cmd);
 }
 
+public interface ICommand
+{
+    bool wasCalled { get; set; }
+    void Execute();
+    public string Name {get; set;}
+}
 
-public class TestCommand(int id) : ICommand
+public class TestCommand: ICommand
 {
     int counter = 0;
+    public bool wasCalled {get; set;} = false;
+    public string Name {get; set;}
+    public TestCommand(string name)
+    {
+        Name = name;
+    }
+    
+    public void Execute()
+    {
+        Console.WriteLine($"Выполнение {Name} в потоке: {Thread.CurrentThread.ManagedThreadId}. Итерация: {++counter}");
+        if (counter == 3) wasCalled = true;
+    }    
+}
+
+class Scheduler : IScheduler
+{
+    private ConcurrentQueue<ICommand> queue = new ConcurrentQueue<ICommand>();
+    private ConcurrentQueue<ICommand> longQueue = new ConcurrentQueue<ICommand>();
+    private List<ServerThread> longThreads;
+    int ind = 0;
+
+    public Scheduler(List<ServerThread> longThreads)
+    {
+        this.longThreads = longThreads;
+    }
+
+    public bool HasCommand()
+    {
+        return !queue.IsEmpty || !longQueue.IsEmpty;
+    }
+
+    public ICommand Select(bool isLongThread, Thread thread)
+    {
+        if (isLongThread && thread == longThreads[ind].currentServerThread)
+        {
+            if (longQueue.TryDequeue(out ICommand command))
+            {
+                ind = (ind + 1) % longThreads.Count;    // Round Robin. Равномерно распределяем долгие команды между потоками для долгих команд
+                return command;
+            }
+        }
+        else if (!isLongThread)
+        {
+            if (queue.TryDequeue(out ICommand command))
+            {
+                return command;
+            }
+        }
+
+        return null;
+    }
+
+    public void Add(ICommand cmd)
+    {
+        if (cmd is HardStop || cmd is SoftStop)
+        {
+            longQueue.Enqueue(cmd);
+            queue.Enqueue(cmd);
+        }
+
+        else if (cmd is TestCommand)
+        {
+            longQueue.Enqueue(cmd);
+        }
+
+        else
+        {
+            queue.Enqueue(cmd);
+        }
+    }
+}
+
+class HardStop : ICommand
+{
+    public ServerThread thread;
+    public bool wasCalled { get; set; }
+    public string Name {get; set;} = "HardStop";
+    public HardStop(ServerThread stoppedThread)
+    {
+        thread = stoppedThread;
+        wasCalled = false;
+    }
 
     public void Execute()
     {
-        Console.WriteLine($"Поток {id} вызов {++counter}");
+        if (Thread.CurrentThread != thread.currentServerThread)
+        {
+            throw new Exception();
+        }
+
+        thread.canContinue = false;
+        Console.WriteLine($"Выполнение {Name} в потоке: {Thread.CurrentThread.ManagedThreadId}");
+        wasCalled = true;
     }
 }
+
+class SoftStop : ICommand
+{
+    ServerThread thread;
+    public bool wasCalled { get; set; }
+    public string Name {get; set;} = "SoftStop";
+    public SoftStop(ServerThread stoppedThread)
+    {
+        thread = stoppedThread;
+        wasCalled = false;
+    }
+
+    public void Execute()
+    {
+        if (Thread.CurrentThread != thread.currentServerThread)
+        {
+            throw new Exception();
+        }
+
+        thread.softStopFlag = true;
+        wasCalled = true;
+    }
+}
+
+class SomeCommand : ICommand
+{
+    public bool wasCalled { get; set; }
+    public string Name {get; set;}
+    public SomeCommand(string name)
+    {
+        wasCalled = false;
+        Name = name;
+    }
+
+    public void Execute()
+    {
+        wasCalled = true;
+        Console.WriteLine($"Выполнение {Name} в потоке: {Thread.CurrentThread.ManagedThreadId}");
+    }
+}
+
+class ServerThread
+{
+    public Thread currentServerThread;
+    public bool canContinue = true;
+    public bool softStopFlag = false;
+    public Scheduler scheduler;
+    public bool isLongThread;
+
+    public ServerThread(Scheduler scheduler, bool isLongThread)
+    {
+        this.scheduler = scheduler;
+        this.isLongThread = isLongThread;
+        Thread thread = new Thread(Handle);
+        currentServerThread = thread;
+        thread.Start();
+    }
+
+    public void AddCommand(ICommand command)
+    {
+        scheduler.Add(command);
+    }
+
+    private void ExeptionHandler(Exception ex, ICommand command)
+    {
+        if (command != null)
+        {
+            // Обработка исключения
+        }
+    }
+
+    public void Handle()
+    {
+        while (canContinue)
+        {
+            ICommand command = null;
+            try
+            {
+                if (scheduler.HasCommand())
+                {
+                    command = scheduler.Select(isLongThread, currentServerThread);
+                    if (command != null)
+                    {
+                        if (command is TestCommand)
+                        {
+                            for (int i = 0; i < 3; i++) command.Execute();
+                        }
+                        
+                        else command.Execute();
+                    }
+                }
+                else if (softStopFlag)
+                {
+                    canContinue = false;
+                }
+            }
+            catch (Exception ex)
+            {
+                ExeptionHandler(ex, command);
+            }
+        }
+    }
+}
+
+#!markdown
+
+Все недолгие команды выполняются в потоке server. Долгие команды добавляются по принципу Round Robin в потоки longThread и обрабатываются там
+
+#!csharp
+
+List<ServerThread> longThreads = new List<ServerThread>();
+Scheduler scheduler = new Scheduler(longThreads);
+ServerThread server = new ServerThread(scheduler, false);
+ServerThread longThread1 = new ServerThread(scheduler, true);
+ServerThread longThread2 = new ServerThread(scheduler, true);
+
+longThreads.Add(longThread1);
+longThreads.Add(longThread2);
+
+SomeCommand cmd1 = new SomeCommand("cmd1"); // Для демонстрации того, что недолгие команды выполняются в своём потоке
+SomeCommand cmd2 = new SomeCommand("cmd2");
+TestCommand longCmd1 = new TestCommand("longCommand1"); // Долгие команды добавляются по принципу Round Robin в потоки longThread и обрабатываются там
+TestCommand longCmd2 = new TestCommand("longCommand2");
+TestCommand longCmd3 = new TestCommand("longCommand3");
+TestCommand longCmd4 = new TestCommand("longCommand4");
+TestCommand longCmd5 = new TestCommand("longCommand5");
+
+server.AddCommand(cmd1);
+server.AddCommand(cmd2); 
+server.AddCommand(longCmd1);
+server.AddCommand(longCmd2);
+server.AddCommand(longCmd3);
+server.AddCommand(longCmd4);
+server.AddCommand(longCmd5);
+
+Thread.Sleep(100);  // Ждём выполнения всех команд
+
+server.AddCommand(new HardStop(server));
+server.AddCommand(new HardStop(longThread1));
+server.AddCommand(new HardStop(longThread2));
+
+server.currentServerThread.Join();
+longThread1.currentServerThread.Join();
+longThread2.currentServerThread.Join();
 
 #!markdown
 
