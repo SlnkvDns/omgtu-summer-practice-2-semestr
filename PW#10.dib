@@ -134,7 +134,7 @@ public class TestCommand: ICommand
     
     public void Execute()
     {
-        Console.WriteLine($"Выполнение {Id} в потоке: {Thread.CurrentThread.ManagedThreadId}. Итерация: {++counter}");
+        if (!wasCalled) Console.WriteLine($"Выполнение {Id} в потоке: {Thread.CurrentThread.ManagedThreadId}. Итерация: {++counter}");
         if (MessageQueue.TryDequeue(out Message msg))
         {
             Console.WriteLine(msg.Content);
