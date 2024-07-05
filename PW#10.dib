@@ -36,3 +36,349 @@
 1. [Паттерн Сообщение](https://www.enterpriseintegrationpatterns.com/patterns/messaging/Message.html)
 2. [Паттерн Роутер - весь раздел про Роутеры](https://www.enterpriseintegrationpatterns.com/patterns/messaging/MessageRoutingIntro.html)
 3. [Обмен сообщеними](https://www.enterpriseintegrationpatterns.com/patterns/messaging/MessageConstructionIntro.html)
+
+#!csharp
+
+using System;
+using System.Threading;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+
+public interface IScheduler
+{
+    bool HasCommand();
+    ICommand Select(bool isLongThread, Thread thread);
+    void Add(ICommand cmd);
+}
+
+public interface ICommand
+{
+    bool wasCalled { get; set; }
+    public string Id {get; set;}
+    public Queue<Message> MessageQueue {get; set;}
+    void Execute();
+}
+
+public class Message
+{
+    public string ReceiverId {get; set;}
+    public string Content {get; set;}
+
+    public Message(string receiverId, string content)
+    {
+        ReceiverId = receiverId;
+        Content = content;
+    }
+}
+
+class Router: ICommand
+{
+    public bool wasCalled {get; set;}
+    public string Id {get; set;}
+    public Queue<Message> MessageQueue {get; set;}
+    public Dictionary<string, Queue<Message>>  RouterData {get; set;}
+    List<ICommand> commands;
+
+    public Router(string id, List<ICommand> commands)
+    {
+        wasCalled = false;
+        Id = id;
+        RouterData = new Dictionary<string, Queue<Message>>();
+        this.commands = commands;
+    }
+
+    public void Execute()
+    {
+        foreach (var kvp in RouterData)
+        {
+            if (kvp.Value.Count > 0)
+            {
+                var message = kvp.Value.Dequeue();
+                foreach (var command in commands)
+                {
+                    if (command.Id == message.ReceiverId)
+                    {
+                        command.MessageQueue.Enqueue(message);
+                        break;
+                    }
+                }
+                break;
+            }
+        }
+    }
+
+    public void AddMessage(Message message)
+    {
+        if (commands.Select(x => x.Id).Contains(message.ReceiverId))
+        {
+            if (!RouterData.ContainsKey(message.ReceiverId))
+            {
+                RouterData[message.ReceiverId] = new Queue<Message>();
+            }
+            RouterData[message.ReceiverId].Enqueue(message);
+        }
+        else Console.WriteLine("Команды с таким Id не существует");
+    }
+}
+
+public class TestCommand: ICommand
+{
+    int counter = 0;
+    public bool wasCalled {get; set;} = false;
+    public string Id {get; set;}
+    public Queue<Message> MessageQueue {get; set;} = new Queue<Message>();
+    public TestCommand(string id)
+    {
+        Id = id;
+    }
+    
+    public void Execute()
+    {
+        Console.WriteLine($"Выполнение {Id} в потоке: {Thread.CurrentThread.ManagedThreadId}. Итерация: {++counter}");
+        if (MessageQueue.TryDequeue(out Message msg))
+        {
+            Console.WriteLine(msg.Content);
+        } 
+        if (counter == 3) wasCalled = true;
+    }    
+}
+
+class Scheduler : IScheduler
+{
+    private ConcurrentQueue<ICommand> queue = new ConcurrentQueue<ICommand>();
+    private ConcurrentQueue<ICommand> longQueue = new ConcurrentQueue<ICommand>();
+    private List<ServerThread> longThreads;
+    int ind;
+
+    public Scheduler(List<ServerThread> longThreads)
+    {
+        this.longThreads = longThreads;
+        if (longThreads.Count % 2 == 1) ind = 0;
+        else ind = 1;
+    }
+
+    public bool HasCommand()
+    {
+        return !queue.IsEmpty || !longQueue.IsEmpty;
+    }
+
+    public ICommand Select(bool isLongThread, Thread thread)
+    {
+        if (isLongThread && thread == longThreads[ind].currentServerThread)
+        {
+            if (longQueue.TryDequeue(out ICommand command))
+            {
+                ind = (ind + 1) % longThreads.Count;    // Round Robin. Равномерно распределяем долгие команды между потоками для долгих команд
+                return command;
+            }
+        }
+        else if (!isLongThread)
+        {
+            if (queue.TryDequeue(out ICommand command))
+            {
+                return command;
+            }
+        }
+
+        return null;
+    }
+
+    public void Add(ICommand cmd)
+    {
+        if (cmd is HardStop || cmd is SoftStop)
+        {
+            longQueue.Enqueue(cmd);
+            queue.Enqueue(cmd);
+        }
+
+        else if (cmd is TestCommand || cmd is Router)
+        {
+            longQueue.Enqueue(cmd);
+        }
+
+        else
+        {
+            queue.Enqueue(cmd);
+        }
+    }
+}
+
+class HardStop : ICommand
+{
+    public ServerThread thread;
+    public bool wasCalled { get; set; }
+    public string Id {get; set;} = "HardStop";
+    public Queue<Message> MessageQueue {get; set;} = new Queue<Message>();
+    public HardStop(ServerThread stoppedThread)
+    {
+        thread = stoppedThread;
+        wasCalled = false;
+    }
+
+    public void Execute()
+    {
+        if (Thread.CurrentThread != thread.currentServerThread)
+        {
+            throw new Exception();
+        }
+
+        thread.canContinue = false;
+        Console.WriteLine($"Выполнение {Id} в потоке: {Thread.CurrentThread.ManagedThreadId}");
+        wasCalled = true;
+    }
+}
+
+class SoftStop : ICommand
+{
+    ServerThread thread;
+    public bool wasCalled { get; set; }
+    public string Id {get; set;} = "SoftStop";
+    public Queue<Message> MessageQueue {get; set;} = new Queue<Message>();
+    public SoftStop(ServerThread stoppedThread)
+    {
+        thread = stoppedThread;
+        wasCalled = false;
+    }
+
+    public void Execute()
+    {
+        if (Thread.CurrentThread != thread.currentServerThread)
+        {
+            throw new Exception();
+        }
+
+        thread.softStopFlag = true;
+        wasCalled = true;
+    }
+}
+
+class SomeCommand : ICommand
+{
+    public bool wasCalled { get; set; }
+    public string Id {get; set;}
+    public Queue<Message> MessageQueue {get; set;} = new Queue<Message>();
+    public SomeCommand(string name)
+    {
+        wasCalled = false;
+        Id = name;
+    }
+
+    public void Execute()
+    {
+        wasCalled = true;
+        Console.WriteLine($"Выполнение {Id} в потоке: {Thread.CurrentThread.ManagedThreadId}");
+    }
+}
+
+class ServerThread
+{
+    public Thread currentServerThread;
+    public bool canContinue = true;
+    public bool softStopFlag = false;
+    public Scheduler scheduler;
+    public bool isLongThread;
+
+    public ServerThread(Scheduler scheduler, bool isLongThread)
+    {
+        this.scheduler = scheduler;
+        this.isLongThread = isLongThread;
+        Thread thread = new Thread(Handle);
+        currentServerThread = thread;
+        thread.Start();
+    }
+
+    public void AddCommand(ICommand command)
+    {
+        scheduler.Add(command);
+    }
+
+    private void ExeptionHandler(Exception ex, ICommand command)
+    {
+        if (command != null)
+        {
+            // Обработка исключения
+        }
+    }
+
+    public void Handle()
+    {
+        while (canContinue)
+        {
+            ICommand command = null;
+            try
+            {
+                if (scheduler.HasCommand())
+                {
+                    command = scheduler.Select(isLongThread, currentServerThread);
+                    if (command != null)
+                    {
+                        if (command is TestCommand)
+                        {
+                            for (int i = 0; i < 3; i++) command.Execute();
+                        }
+                        
+                        else command.Execute();
+                    }
+                }
+                else if (softStopFlag)
+                {
+                    canContinue = false;
+                }
+            }
+            catch (Exception ex)
+            {
+                ExeptionHandler(ex, command);
+            }
+        }
+    }
+}
+
+#!csharp
+
+List<ServerThread> longThreads = new List<ServerThread>();
+Scheduler scheduler = new Scheduler(longThreads);
+ServerThread server = new ServerThread(scheduler, false);
+ServerThread longThread1 = new ServerThread(scheduler, true);
+ServerThread longThread2 = new ServerThread(scheduler, true);
+
+longThreads.Add(longThread1);
+longThreads.Add(longThread2);
+
+SomeCommand cmd = new SomeCommand("Обычная команда");
+TestCommand longCmd1 = new TestCommand("longCommand1"); // Долгие команды добавляются по принципу Round Robin в потоки longThread и обрабатываются там
+TestCommand longCmd2 = new TestCommand("longCommand2");
+
+Message msg1 = new Message("longCommand1", "Добавлено сообщение 1 в longCommand1");
+Message msg2 = new Message("longCommand1", "Добавлено сообщение 2 в longCommand1");
+Message msg3 = new Message("longCommand2", "Добавлено сообщение 1 в longCommand2");
+Message msg4 = new Message("longCommand2", "Добавлено сообщение 2 в longCommand2");
+Message nonExistentCommandMessage = new Message("nonExistentCommand", "Добавление сообщения несуществующей команде");
+
+List<ICommand> commands = new List<ICommand> {longCmd1, longCmd2};
+Router router = new Router("router", commands);
+
+router.AddMessage(msg1);
+router.AddMessage(msg2);
+router.AddMessage(msg3);
+router.AddMessage(msg4);
+router.AddMessage(nonExistentCommandMessage);
+
+
+server.AddCommand(router);
+server.AddCommand(router);
+server.AddCommand(router);
+server.AddCommand(router);
+
+server.AddCommand(longCmd1);
+server.AddCommand(longCmd2);
+
+Thread.Sleep(1000);  // Ждём выполнения всех команд
+
+Console.WriteLine();
+server.AddCommand(new HardStop(server));
+server.AddCommand(new HardStop(longThread1));
+server.AddCommand(new HardStop(longThread2));
+
+server.currentServerThread.Join();
+longThread1.currentServerThread.Join();
+longThread2.currentServerThread.Join();
