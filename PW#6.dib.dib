@@ -39,8 +39,323 @@
 
 #!markdown
 
-// здесь писать код
+## Вычисление BlockingCollection
+
+#!csharp
+
+using System.Threading;
+using System.Collections.Concurrent;
+using System.Diagnostics;
+
+BlockingCollection<int> blockingCollection = new BlockingCollection<int>();
+
+ManualResetEvent WriterStarted = new ManualResetEvent(false);
+ManualResetEvent ReaderFinished = new ManualResetEvent(false);
+
+private (long TotalTime, long WriteTime, long ReadTime) CalculateBlCol()
+{
+    Stopwatch blockingCollectionTimer = new Stopwatch();
+    long writeTime = 0;
+    long readTime = 0;
+    Thread thread1 = new Thread(() => writeTime = WriteDataBlCol());
+    Thread thread2 = new Thread(() => readTime = ReadDataBlCol());
+
+    thread2.Start();                        // Запускаем поток чтения
+    thread1.Start();                        // Запускаем поток записи
+
+    WriterStarted.WaitOne();                // Ждём начала записи объектов в очередь
+    blockingCollectionTimer.Start();        // Активируем таймер после запуска обоих потоков и начала записи
+    ReaderFinished.WaitOne();               // Ожидаем, когда поток чтения всё прочитает (ждём сигнал, о том, что будет прочитан последний объект)
+    blockingCollectionTimer.Stop();         // Останавливаем таймер после завершения чтения последнего объекта
+
+    thread1.Join();
+    thread2.Join();
+
+    WriterStarted = new ManualResetEvent(false);    // Сбрасываем сигналы после завершения записи и чтения
+    ReaderFinished = new ManualResetEvent(false);
+
+    return (blockingCollectionTimer.ElapsedMilliseconds, writeTime, readTime);
+}
+
+int numObject = 1000000;
+
+private long WriteDataBlCol()
+{
+    Stopwatch writeTimer = new Stopwatch();
+    int countWrittenNumbers = 0;
+    
+    while (countWrittenNumbers < numObject)
+    {
+        blockingCollection.Add(1);
+        countWrittenNumbers++;
+        if (countWrittenNumbers == 1)
+        {
+            WriterStarted.Set();    // Сигнализируем о первой записи
+            writeTimer.Start();
+        }   
+    }
+
+    writeTimer.Stop();  // Останавливаем таймер записи после записи всех объектов
+    return writeTimer.ElapsedMilliseconds;
+}
+
+private long ReadDataBlCol()
+{
+    Stopwatch readTimer = new Stopwatch();
+    int countReadNumbers = 0;
+    
+
+    while (countReadNumbers < numObject)
+    {
+        if (blockingCollection.TryTake(out int item))
+        {
+            countReadNumbers++;
+            if (countReadNumbers == 1)  // При первом чтении объекта запускаем таймер потока чтения
+                readTimer.Start();
+        }
+    }
+    
+    readTimer.Stop();
+    ReaderFinished.Set();       // Сигнализируем о том, что был прочитан последний объект
+    return readTimer.ElapsedMilliseconds;
+}
+
+#!csharp
+
+#r "nuget:ScottPlot, 5.0.*"
+
+using Microsoft.DotNet.Interactive.Formatting;
+Formatter.Register(typeof(ScottPlot.Plot), (p, w) => 
+    w.Write(((ScottPlot.Plot)p).GetImageHtml(400, 300)), HtmlFormatter.MimeType);
+
+
+List<int> dataX = new List<int>();
+List<long> dataY1 = new List<long>();
+List<long> dataY2 = new List<long>();
+double avgFirstIntervalBlockCol = 0;
+
+for (int i = 1; i < 11; i++)
+{
+    var result = CalculateBlCol();
+    long firstInterval = result.ReadTime;                // Время за которое поток или цикл обработает миллион объектов
+    long secondInterval = result.TotalTime;              // Время, необходимое на запись и чтение миллиона объектов из очереди
+    avgFirstIntervalBlockCol += firstInterval / 10.0;
+    
+    dataX.Add(i);
+    dataY1.Add(firstInterval);
+    dataY2.Add(secondInterval);
+}
+
+Console.WriteLine($"Среднее время за которое поток или цикл обработает миллион объектов: {Math.Round(avgFirstIntervalBlockCol, 2)}");
+
+ScottPlot.Plot plt1 = new();
+ScottPlot.Plot plt2 = new();
+plt1.Add.Scatter(dataX, dataY1);
+plt2.Add.Scatter(dataX, dataY2);
+
+plt1.XLabel("Номер замера");
+plt1.YLabel("Первый промежуток времени");
+plt2.XLabel("Номер замера");
+plt2.YLabel("Второй промежуток времени");
+
+plt1.Display();
+plt2.Display();
+
+#!markdown
+
+## Вычисление ConcurrentQueue
+
+#!csharp
+
+ConcurrentQueue<int> concurrentQueue = new ConcurrentQueue<int>();
+
+WriterStarted = new ManualResetEvent(false);
+ReaderFinished = new ManualResetEvent(false);
+
+private (long TotalTime, long WriteTime, long ReadTime) CalculateConQ()
+{
+    Stopwatch concurrentQueueTimer = new Stopwatch();
+    long writeTime = 0;
+    long readTime = 0;
+    Thread thread1 = new Thread(() => writeTime = WriteDataConQ());
+    Thread thread2 = new Thread(() => readTime = ReadDataConQ());
+
+    thread2.Start();            // Запускаем поток чтения
+    thread1.Start();            // Запускаем поток записи
+
+    WriterStarted.WaitOne();          // Ждём начала записи объектов в очередь
+    concurrentQueueTimer.Start();     // Активируем таймер после запуска обоих потоков и начала записи
+    ReaderFinished.WaitOne();         // Ожидаем, когда поток чтения всё прочитает (ждём сигнал, о том, что будет прочитан последний объект)
+    concurrentQueueTimer.Stop();      // Останавливаем таймер после завершения чтения последнего объекта
+
+    thread1.Join();
+    thread2.Join();
+
+    WriterStarted = new ManualResetEvent(false);    // Сбрасываем сигналы после завершения записи и чтения
+    ReaderFinished = new ManualResetEvent(false);
+    
+    return (concurrentQueueTimer.ElapsedMilliseconds, writeTime, readTime);
+}
+
+int numObject = 1000000;
+
+private long WriteDataConQ()
+{
+    Stopwatch writeTimer = new Stopwatch();
+    int countWrittenNumbers = 0;
+    
+    while (countWrittenNumbers < numObject)
+    {
+        concurrentQueue.Enqueue(1);
+        countWrittenNumbers++;
+        if (countWrittenNumbers == 1)
+        {
+            WriterStarted.Set();    // Сигнализируем о первой записи
+            writeTimer.Start();
+        }
+    }
+
+    writeTimer.Stop();  // Останавливаем таймер записи после записи всех объектов
+    return writeTimer.ElapsedMilliseconds;
+}
+
+private long ReadDataConQ()
+{
+    Stopwatch readTimer = new Stopwatch();
+    int countReadNumbers = 0;
+    
+
+    while (countReadNumbers < numObject)
+    {
+        if (concurrentQueue.TryDequeue(out int item))
+        {
+            countReadNumbers++;
+            if (countReadNumbers == 1)  // При первом чтении объекта запускаем таймер потока чтения
+                readTimer.Start();
+        }
+    }
+    
+    readTimer.Stop();
+    ReaderFinished.Set();       // Сигнализируем о том, что был прочитан последний объект
+    return readTimer.ElapsedMilliseconds;
+}
+
+#!csharp
+
+List<int> dataX = new List<int>();
+List<long> dataY1 = new List<long>();
+List<long> dataY2 = new List<long>();
+double avgFirstIntervalConQ = 0;
+
+for (int i = 1; i < 11; i++)
+{
+    var result = CalculateConQ();
+    long firstInterval = result.ReadTime;            // Время за которое поток или цикл обработает миллион объектов
+    long secondInterval = result.TotalTime;          // Время, необходимое на запись и чтение миллиона объектов из очереди
+    avgFirstIntervalConQ += firstInterval / 10.0;
+    
+    dataX.Add(i);
+    dataY1.Add(firstInterval);
+    dataY2.Add(secondInterval);
+}
+
+Console.WriteLine($"Среднее время за которое поток или цикл обработает миллион объектов: {Math.Round(avgFirstIntervalConQ, 2)}");
+
+ScottPlot.Plot plt1 = new();
+ScottPlot.Plot plt2 = new();
+plt1.Add.Scatter(dataX, dataY1);
+plt2.Add.Scatter(dataX, dataY2);
+
+plt1.XLabel("Номер замера");
+plt1.YLabel("Первый промежуток времени");
+plt2.XLabel("Номер замера");
+plt2.YLabel("Второй промежуток времени");
+
+plt1.Display();
+plt2.Display();
+
+#!markdown
+
+## Вычисление Queue
+
+#!csharp
+
+private (long TotalTime, long WriteTime, long ReadTime) CalculateQueue(int numObject)
+{
+    Queue<int> queue = new Queue<int>();
+    Stopwatch stopwatch = new Stopwatch();
+    Stopwatch totalTime = new Stopwatch();
+    int countWritten = 0;
+
+    stopwatch.Start();
+    totalTime.Start();
+    while (countWritten < numObject)
+    {
+        queue.Enqueue(1);
+        countWritten++;
+    }
+    totalTime.Stop();
+    stopwatch.Stop();
+    long writeTime = stopwatch.ElapsedMilliseconds;
+    stopwatch.Reset();
+
+    int countRead = 0;
+    stopwatch.Start();
+    totalTime.Start();
+    while (countRead < numObject)
+    {
+        queue.Dequeue();
+        countRead++;
+    }
+    totalTime.Stop();
+    stopwatch.Stop();
+    long readTime = stopwatch.ElapsedMilliseconds;
+
+    return (totalTime.ElapsedMilliseconds, writeTime, readTime);
+}
+
+#!csharp
+
+List<int> dataX = new List<int>();
+List<long> dataY1 = new List<long>();
+List<long> dataY2 = new List<long>();
+double avgFirstIntervalQueue = 0;
+
+for (int i = 1; i < 11; i++)
+{
+    var result = CalculateQueue(1000000);
+    long firstInterval = result.ReadTime + result.WriteTime;         // Время за которое поток или цикл обработает миллион объектов
+    long secondInterval = result.TotalTime;                          // Время, необходимое на запись и чтение миллиона объектов из очереди
+    avgFirstIntervalQueue += firstInterval / 10.0;  
+    
+    dataX.Add(i);
+    dataY1.Add(firstInterval);
+    dataY2.Add(secondInterval);
+}
+
+Console.WriteLine($"Среднее время за которое поток или цикл обработает миллион объектов: {Math.Round(avgFirstIntervalQueue, 2)}");
+
+ScottPlot.Plot plt1 = new();
+ScottPlot.Plot plt2 = new();
+plt1.Add.Scatter(dataX, dataY1);
+plt2.Add.Scatter(dataX, dataY2);
+
+plt1.XLabel("Номер замера");
+plt1.YLabel("Первый промежуток времени");
+plt2.XLabel("Номер замера");
+plt2.YLabel("Второй промежуток времени");
+
+plt1.Display();
+plt2.Display();
+
+#!csharp
+
+Console.WriteLine($"Среднее время за которое BlockingCollection обработает миллион объектов: {Math.Round(avgFirstIntervalBlockCol, 2)}");
+Console.WriteLine($"Среднее время за которое ConcurrentQueue обработает миллион объектов: {Math.Round(avgFirstIntervalConQ, 2)}");
+Console.WriteLine($"Среднее время за которое Queue обработает миллион объектов: {Math.Round(avgFirstIntervalQueue, 2)}");
+Console.WriteLine($"Cкорость самой быстрой поток-безопасной коллекции по сравнению с обычной очредью: {Math.Round(avgFirstIntervalConQ*100 / avgFirstIntervalQueue, 2)}%")
 
 #!markdown
 
 ## Вывод
+Самой быстрой поток-безопасной очередью является ConcurrentQueue. В данной задаче она медленнее обычной очереди, так как требуется дополниетельное время для синхронизации. Её скорость по сравненю с обычной очередью ~200% Однако она многократно быстрее BlockingCollection.
