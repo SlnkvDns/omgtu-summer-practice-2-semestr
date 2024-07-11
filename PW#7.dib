@@ -17,10 +17,193 @@
 
 #!csharp
 
+using System.Threading;
+using System.Collections.Concurrent;
+
 public interface ICommand
 {
     void Execute();
 }
+
+class HardStop: ICommand
+{
+    ServerThread thread;
+    public ManualResetEvent mre;
+    public HardStop(ServerThread stopedThread)
+    {
+        mre = new ManualResetEvent(false);
+        thread = stopedThread;
+    }
+
+    public void Execute()
+    {
+        if (Thread.CurrentThread != thread.currentServerThread)
+        {
+            throw new Exception();
+        }
+
+        mre.Reset();
+        thread.canContinue = false;
+        mre.Set();
+    }
+}
+
+class SoftStop: ICommand
+{
+    ServerThread thread;
+    public ManualResetEvent mre;
+    public SoftStop(ServerThread stopedThread)
+    {
+        mre = new ManualResetEvent(false);
+        thread = stopedThread;
+    }
+
+    public void Execute()
+    {
+        if (Thread.CurrentThread != thread.currentServerThread)
+        {
+            throw new Exception();
+        }
+
+        mre.Reset();
+        thread.softStopFlag = true;
+        mre.Set();
+    }
+}
+
+class SomeCommand: ICommand
+{
+    public bool wasCalled;
+    public ManualResetEvent mre;
+
+    public SomeCommand()
+    {
+        mre = new ManualResetEvent(false);
+        wasCalled = false;
+    }
+    
+    public void Execute()
+    {
+        mre.Reset();
+        Thread.Sleep(5);    // Используется для теста SoftStop, чтобы команда добавилась в очередь, но запустилась после завершения команды SoftStop
+        wasCalled = true;
+        mre.Set();
+    }
+}
+
+class ServerThread
+{
+    public Thread currentServerThread;
+    public ConcurrentQueue<ICommand> queue;
+    public bool canContinue = true;
+    public bool softStopFlag = false;
+    
+
+    public ServerThread()
+    {
+        queue = new ConcurrentQueue<ICommand>();
+        Thread thread = new Thread(Handle);
+        currentServerThread = thread;
+        thread.Start();
+    }
+
+    public void AddCommand(ICommand command)
+    {
+        queue.Enqueue(command);
+    }
+
+    private void ExeptionHandler(Exception ex, ICommand command)
+    {
+        if (command != null)
+        {
+            // Обработка исключения
+        }
+    }
+
+    public void Handle()
+    {
+        while (canContinue)
+        {
+            ICommand command = null;
+            try
+            {
+                if (queue.TryDequeue(out command))
+                {
+                    command.Execute();
+                }
+                
+                else if (softStopFlag)
+                {
+                    canContinue = false;
+                }
+            }
+            catch (Exception ex)
+            {
+                ExeptionHandler(ex, command);
+            }
+        }
+    }
+}
+
+#!markdown
+
+## Проверка HardStop
+
+#!csharp
+
+ServerThread st = new ServerThread();     // Создаём поток
+
+var cmd1 = new SomeCommand();   
+
+Console.WriteLine("Добавили команду 1");
+st.AddCommand(cmd1);
+cmd1.mre.WaitOne();      // Ожидаем, когда команда выполнится
+
+Console.WriteLine($"Статус вызова команды 1: {cmd1.wasCalled}");
+
+var hardStopCommand = new HardStop(st);
+st.AddCommand(hardStopCommand);
+hardStopCommand.mre.WaitOne();      // Ждём завершения HardStop
+Console.WriteLine("Сделали HardStop");
+Console.WriteLine($"Состояние Alive потока st: {st.currentServerThread.IsAlive}");
+
+var cmd2 = new SomeCommand();           
+
+Console.WriteLine("Добавили команду 2");
+st.AddCommand(cmd2);     // Добавляем какую-то команду
+//cmd2.mre.WaitOne();  C этой строчкой поток будет вечно ждать выполнения команды 2, однако этого не случится
+
+Console.WriteLine($"Статус вызова команды 2: {cmd2.wasCalled}");      // Эта команда уже не будет вызвана, т.к поток остановлен
+
+#!markdown
+
+## Проверка SoftStop
+
+#!csharp
+
+ServerThread st2 = new ServerThread();     // Создаём поток
+
+var cmd3 = new SomeCommand();   
+
+Console.WriteLine("Добавили команду 3");
+st2.AddCommand(cmd3);
+cmd3.mre.WaitOne();      // Ожидаем, когда команда выполнится
+Console.WriteLine($"Статус вызова команды 3: {cmd3.wasCalled}");
+
+var softStopCommand = new SoftStop(st2);
+st2.AddCommand(softStopCommand);
+
+var cmd4 = new SomeCommand();               
+Console.WriteLine("Добавили команду 4");
+st2.AddCommand(cmd4);     // Добавляем какую-то команду
+
+softStopCommand.mre.WaitOne();          // Ждём, когда завершится SoftStop
+Console.WriteLine("Сделали SoftStop");
+cmd4.mre.WaitOne();                     // Ждём, когда завершится команда 4
+
+Console.WriteLine($"Статус вызова команды 4: {cmd4.wasCalled}");  
+
+Console.WriteLine($"Состояние Alive потока st2: {st2.currentServerThread.IsAlive}");
 
 #!markdown
 
